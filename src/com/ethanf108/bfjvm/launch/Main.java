@@ -32,10 +32,7 @@ import edu.rit.csh.intraspect.data.instruction.stack.PopInstruction;
 import edu.rit.csh.intraspect.data.instruction.store.IAStoreInstruction;
 import edu.rit.csh.intraspect.util.OffsetOutputStream;
 
-import java.io.FileOutputStream;
-import java.io.IOError;
-import java.io.IOException;
-import java.io.OutputStream;
+import java.io.*;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Stack;
@@ -59,11 +56,53 @@ public class Main {
     }
 
     public static void main(String[] args) throws IOException {
-        final String CODE = "code";
-        final String fileName = "bf";
-        final int DATA_SIZE = 10000;
+        File outFile = null;
+        File inFile = null;
+        int dataSize = 10_000;
+        boolean verbose = false;
+        try {
+            for (int i = 0; i < args.length; i++) {
+                final String arg = args[i];
+                if (arg.equals("-o") || arg.equals("--output")) {
+                    String path = args[++i];
+                    if (!path.endsWith(".class")) {
+                        path += ".class";
+                    }
+                    outFile = new File(path);
+                    if (!outFile.exists()) {
+                        outFile.createNewFile();
+                    }
+                    if (!outFile.canWrite()) {
+                        System.out.println("Cannot write to file");
+                        return;
+                    }
+                } else if (arg.equals("-i") || arg.equals("--input")) {
+                    final String path = args[++i];
+                    inFile = new File(path);
+                    if (!inFile.exists()) {
+                        System.out.println("File '" + path + "' not found");
+                        return;
+                    }
+                    if (!inFile.canRead()) {
+                        System.out.println("Cannot read from file");
+                        return;
+                    }
+                } else if (arg.equals("-d") || arg.equals("--data-size")) {
+                    dataSize = Integer.parseInt(args[i++]);
+                } else if (arg.equals("-v") || arg.equals("--verbose")) {
+                    verbose = true;
+                }
+            }
+        } catch (ArrayIndexOutOfBoundsException ex) {
+            System.out.println("Missing parameter for " + args[args.length - 1]);
+            return;
+        }
+        if (outFile == null) {
+            outFile = new File("a.class");
+        }
+        final String className = outFile.getName().substring(0, outFile.getName().lastIndexOf(".class"));
         ClassFile cf = new ClassFile();
-        cf.setThisClass(cf.addConstant(new ClassConstant(cf.putUTFIfAbsent(fileName))));
+        cf.setThisClass(cf.addConstant(new ClassConstant(cf.putUTFIfAbsent(className))));
         cf.setSuperClass(cf.addConstant(new ClassConstant(cf.putUTFIfAbsent("java/lang/Object"))));
         cf.setFlag(ClassFile.AccessFlag.PUBLIC);
         cf.setMajorVersion(new MajorVersion(61));
@@ -339,7 +378,7 @@ public class Main {
                                         new DupInstruction(),
                                         new IfltInstruction(13),
                                         new DupInstruction(),
-                                        new LdcInstruction(cf.addConstant(new IntegerConstant(DATA_SIZE))),
+                                        new LdcInstruction(cf.addConstant(new IntegerConstant(dataSize))),
                                         new If_icmpgeInstruction(21),
                                         new PutStaticInstruction(pointerField),
                                         new ReturnInstruction(),
@@ -402,15 +441,25 @@ public class Main {
         List<Instruction> mainMethodCode = new ArrayList<>(List.of(
                 new IConst_0Instruction(),
                 new PutStaticInstruction(pointerField),
-                new SipushInstruction((short) DATA_SIZE),
+                new SipushInstruction((short) dataSize),
                 new NewArrayInstruction(10),
                 new PutStaticInstruction(dataField)
         ));
 
+        InputStream in = null;
+        if (inFile == null) {
+            in = System.in;
+        } else {
+            in = new FileInputStream(inFile);
+        }
+
+        int read;
+
         int plusMinus = 0;
         int shift = 0;
 
-        for (char c : CODE.toCharArray()) {
+        while ((read = in.read()) != -1) {
+            final char c = (char) read;
             if (c == '+') {
                 plusMinus++;
             } else if (c == '-') {
@@ -504,6 +553,6 @@ public class Main {
                 }
         ));
 
-        cf.write(new FileOutputStream("path to file"));
+        cf.write(new FileOutputStream(outFile));
     }
 }
