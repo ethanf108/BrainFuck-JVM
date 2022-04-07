@@ -1,6 +1,7 @@
 package com.ethanf108.bfjvm.launch;
 
 import edu.rit.csh.intraspect.data.ClassFile;
+import edu.rit.csh.intraspect.data.FieldDesc;
 import edu.rit.csh.intraspect.data.MajorVersion;
 import edu.rit.csh.intraspect.data.MethodDesc;
 import edu.rit.csh.intraspect.data.attribute.AttributeDesc;
@@ -9,31 +10,28 @@ import edu.rit.csh.intraspect.data.attribute.StackMapTableAttribute;
 import edu.rit.csh.intraspect.data.attribute.stackmaptable.FullFrame;
 import edu.rit.csh.intraspect.data.attribute.stackmaptable.SameFrame;
 import edu.rit.csh.intraspect.data.attribute.stackmaptable.StackMapFrame;
-import edu.rit.csh.intraspect.data.attribute.stackmaptable.verificationtypeinfo.IntegerVariableInfo;
-import edu.rit.csh.intraspect.data.attribute.stackmaptable.verificationtypeinfo.ObjectVariableInfo;
 import edu.rit.csh.intraspect.data.attribute.stackmaptable.verificationtypeinfo.VerificationTypeInfo;
 import edu.rit.csh.intraspect.data.constant.ClassConstant;
 import edu.rit.csh.intraspect.data.constant.FieldRefConstant;
 import edu.rit.csh.intraspect.data.constant.MethodRefConstant;
 import edu.rit.csh.intraspect.data.constant.NameAndTypeConstant;
 import edu.rit.csh.intraspect.data.instruction.Instruction;
-import edu.rit.csh.intraspect.data.instruction.branch.IfneInstruction;
+import edu.rit.csh.intraspect.data.instruction.branch.GotoInstruction;
+import edu.rit.csh.intraspect.data.instruction.branch.IfeqInstruction;
 import edu.rit.csh.intraspect.data.instruction.constant.BipushInstruction;
 import edu.rit.csh.intraspect.data.instruction.constant.IConst_0Instruction;
 import edu.rit.csh.intraspect.data.instruction.constant.SipushInstruction;
+import edu.rit.csh.intraspect.data.instruction.control.IReturnInstruction;
 import edu.rit.csh.intraspect.data.instruction.control.ReturnInstruction;
 import edu.rit.csh.intraspect.data.instruction.field.GetStaticInstruction;
+import edu.rit.csh.intraspect.data.instruction.field.PutStaticInstruction;
+import edu.rit.csh.intraspect.data.instruction.invoke.InvokeStaticInstruction;
 import edu.rit.csh.intraspect.data.instruction.invoke.InvokeVirtualInstruction;
-import edu.rit.csh.intraspect.data.instruction.load.ALoad_1Instruction;
 import edu.rit.csh.intraspect.data.instruction.load.BALoadInstruction;
 import edu.rit.csh.intraspect.data.instruction.load.ILoad_0Instruction;
 import edu.rit.csh.intraspect.data.instruction.math.add.IAddInstruction;
-import edu.rit.csh.intraspect.data.instruction.misc.IincInstruction;
 import edu.rit.csh.intraspect.data.instruction.object.NewArrayInstruction;
-import edu.rit.csh.intraspect.data.instruction.stack.Dup2Instruction;
-import edu.rit.csh.intraspect.data.instruction.store.AStore_1Instruction;
 import edu.rit.csh.intraspect.data.instruction.store.BAStoreInstruction;
-import edu.rit.csh.intraspect.data.instruction.store.IStore_0Instruction;
 import edu.rit.csh.intraspect.util.OffsetOutputStream;
 
 import java.io.FileOutputStream;
@@ -49,7 +47,11 @@ public class Main {
         OffsetOutputStream out = new OffsetOutputStream(OutputStream.nullOutputStream());
         list.forEach(n -> {
             try {
-                n.write(out);
+                if (n == null) { //ifeq placeholder
+                    new IfeqInstruction(0).write(out);
+                } else {
+                    n.write(out);
+                }
             } catch (IOException e) {
             }
         });
@@ -57,164 +59,349 @@ public class Main {
     }
 
     public static void main(String[] args) throws IOException {
-        final String CODE = "++++[>++++[>++++<-]<-]>>+.";
+        final String CODE = ">++++++++[<+++++++++>-]<.>++++[<+++++++>-]<+.+++++++..+++.>>++++++[<+++++++>-]<+\n" +
+                "+.------------.>++++++[<+++++++++>-]<+.<.+++.------.--------.>>>++++[<++++++++>-\n" +
+                "]<+.[-]++++++++++.";
         final String fileName = "bf";
+        final int DATA_SIZE = 10000;
         ClassFile cf = new ClassFile();
         cf.setThisClass(cf.addConstant(new ClassConstant(cf.putUTFIfAbsent(fileName))));
         cf.setSuperClass(cf.addConstant(new ClassConstant(cf.putUTFIfAbsent("java/lang/Object"))));
         cf.setFlag(ClassFile.AccessFlag.PUBLIC);
         cf.setMajorVersion(new MajorVersion(61));
         cf.setMinorVersion(0);
-        final int ca = cf.addConstant(new ClassConstant(cf.putUTFIfAbsent("[B")));
 
         final int systemClass = cf.addConstant(new ClassConstant(cf.putUTFIfAbsent("java/lang/System")));
 
-        final int soutMethod = cf.addConstant(new MethodRefConstant(
-                cf.addConstant(new ClassConstant(cf.putUTFIfAbsent("java/io/PrintStream"))),
+        cf.addField(new FieldDesc(
+                FieldDesc.combineFlags(FieldDesc.AccessFlag.PRIVATE, FieldDesc.AccessFlag.STATIC),
+                cf.putUTFIfAbsent("pointer"),
+                cf.putUTFIfAbsent("I"),
+                new AttributeDesc[0]
+        ));
+
+        final int pointerField = cf.addConstant(new FieldRefConstant(
+                cf.getThisClassIndex(),
+                cf.addConstant(new NameAndTypeConstant(
+                        cf.putUTFIfAbsent("pointer"),
+                        cf.putUTFIfAbsent("I")
+                ))
+        ));
+
+        cf.addField(new FieldDesc(
+                FieldDesc.combineFlags(FieldDesc.AccessFlag.PRIVATE, FieldDesc.AccessFlag.STATIC),
+                cf.putUTFIfAbsent("data"),
+                cf.putUTFIfAbsent("[B"),
+                new AttributeDesc[0]
+        ));
+
+        final int dataField = cf.addConstant(new FieldRefConstant(
+                cf.getThisClassIndex(),
+                cf.addConstant(new NameAndTypeConstant(
+                        cf.putUTFIfAbsent("data"),
+                        cf.putUTFIfAbsent("[B")
+                ))
+        ));
+
+
+        cf.addMethod(new MethodDesc(
+                MethodDesc.combineFlags(MethodDesc.AccessFlag.PRIVATE, MethodDesc.AccessFlag.STATIC),
+                cf.putUTFIfAbsent("get"),
+                cf.putUTFIfAbsent("()B"),
+                new AttributeDesc[]{
+                        new CodeAttribute(
+                                cf.putUTFIfAbsent("Code"),
+                                2,
+                                0,
+                                new Instruction[]{
+                                        new GetStaticInstruction(dataField),
+                                        new GetStaticInstruction(pointerField),
+                                        new BALoadInstruction(),
+                                        new IReturnInstruction()
+                                },
+                                new CodeAttribute.ExceptionDesc[0],
+                                new AttributeDesc[0]
+                        )
+                }
+        ));
+
+        final int getMethod = cf.addConstant(new MethodRefConstant(
+                cf.getThisClassIndex(),
+                cf.addConstant(new NameAndTypeConstant(
+                        cf.putUTFIfAbsent("get"),
+                        cf.putUTFIfAbsent("()B")
+                ))
+        ));
+
+        cf.addMethod(new MethodDesc(
+                MethodDesc.combineFlags(MethodDesc.AccessFlag.PRIVATE, MethodDesc.AccessFlag.STATIC),
+                cf.putUTFIfAbsent("put"),
+                cf.putUTFIfAbsent("(B)V"),
+                new AttributeDesc[]{
+                        new CodeAttribute(
+                                cf.putUTFIfAbsent("Code"),
+                                3,
+                                1,
+                                new Instruction[]{
+                                        new GetStaticInstruction(dataField),
+                                        new GetStaticInstruction(pointerField),
+                                        new ILoad_0Instruction(),
+                                        new BAStoreInstruction(),
+                                        new ReturnInstruction()
+                                },
+                                new CodeAttribute.ExceptionDesc[0],
+                                new AttributeDesc[0]
+                        )
+                }
+        ));
+
+        final int setMethod = cf.addConstant(new MethodRefConstant(
+                cf.getThisClassIndex(),
+                cf.addConstant(new NameAndTypeConstant(
+                        cf.putUTFIfAbsent("put"),
+                        cf.putUTFIfAbsent("(B)V")
+                ))
+        ));
+
+        cf.addMethod(new MethodDesc(
+                MethodDesc.combineFlags(MethodDesc.AccessFlag.PRIVATE, MethodDesc.AccessFlag.STATIC),
+                cf.putUTFIfAbsent("print"),
+                cf.putUTFIfAbsent("()V"),
+                new AttributeDesc[]{
+                        new CodeAttribute(
+                                cf.putUTFIfAbsent("Code"),
+                                2,
+                                0,
+                                new Instruction[]{
+                                        new GetStaticInstruction(cf.addConstant(new FieldRefConstant(
+                                                systemClass,
+                                                cf.addConstant(new NameAndTypeConstant(
+                                                        cf.putUTFIfAbsent("out"),
+                                                        cf.putUTFIfAbsent("Ljava/io/PrintStream;")
+                                                ))
+                                        ))),
+                                        new InvokeStaticInstruction(getMethod),
+                                        new InvokeVirtualInstruction(
+                                                cf.addConstant(new MethodRefConstant(
+                                                        cf.addConstant(new ClassConstant(cf.putUTFIfAbsent("java/io/PrintStream"))),
+                                                        cf.addConstant(new NameAndTypeConstant(
+                                                                cf.putUTFIfAbsent("print"),
+                                                                cf.putUTFIfAbsent("(C)V")
+                                                        ))
+                                                ))
+                                        ),
+                                        new ReturnInstruction()
+                                },
+                                new CodeAttribute.ExceptionDesc[0],
+                                new AttributeDesc[0]
+                        )
+                }
+        ));
+        final int printMethod = cf.addConstant(new MethodRefConstant(
+                cf.getThisClassIndex(),
                 cf.addConstant(new NameAndTypeConstant(
                         cf.putUTFIfAbsent("print"),
-                        cf.putUTFIfAbsent("(C)V")
-                ))
-        ));
-        final int soutField = cf.addConstant(new FieldRefConstant(
-                systemClass,
-                cf.addConstant(new NameAndTypeConstant(
-                        cf.putUTFIfAbsent("out"),
-                        cf.putUTFIfAbsent("Ljava/io/PrintStream;")
+                        cf.putUTFIfAbsent("()V")
                 ))
         ));
 
-        final int sinMethod = cf.addConstant(new MethodRefConstant(
-                cf.addConstant(new ClassConstant(cf.putUTFIfAbsent("java/io/InputStream"))),
+        cf.addMethod(new MethodDesc(
+                MethodDesc.combineFlags(MethodDesc.AccessFlag.PRIVATE, MethodDesc.AccessFlag.STATIC),
+                cf.putUTFIfAbsent("read"),
+                cf.putUTFIfAbsent("()V"),
+                new AttributeDesc[]{
+                        new CodeAttribute(
+                                cf.putUTFIfAbsent("Code"),
+                                3,
+                                0,
+                                new Instruction[]{
+                                        new GetStaticInstruction(dataField),
+                                        new GetStaticInstruction(pointerField),
+                                        new GetStaticInstruction(cf.addConstant(new FieldRefConstant(
+                                                systemClass,
+                                                cf.addConstant(new NameAndTypeConstant(
+                                                        cf.putUTFIfAbsent("in"),
+                                                        cf.putUTFIfAbsent("Ljava/io/InputStream;")
+                                                ))
+                                        ))),
+                                        new InvokeVirtualInstruction(cf.addConstant(new MethodRefConstant(
+                                                cf.addConstant(new ClassConstant(cf.putUTFIfAbsent("java/io/InputStream"))),
+                                                cf.addConstant(new NameAndTypeConstant(
+                                                        cf.putUTFIfAbsent("read"),
+                                                        cf.putUTFIfAbsent("()I")
+                                                ))
+                                        ))),
+                                        new BAStoreInstruction(),
+                                        new ReturnInstruction()
+                                },
+                                new CodeAttribute.ExceptionDesc[0],
+                                new AttributeDesc[0]
+                        )
+                }
+        ));
+
+        final int readMethod = cf.addConstant(new MethodRefConstant(
+                cf.getThisClassIndex(),
                 cf.addConstant(new NameAndTypeConstant(
                         cf.putUTFIfAbsent("read"),
-                        cf.putUTFIfAbsent("()I")
+                        cf.putUTFIfAbsent("()V")
                 ))
         ));
 
-        final int sinField = cf.addConstant(new FieldRefConstant(
-                systemClass,
+        cf.addMethod(new MethodDesc(
+                MethodDesc.combineFlags(MethodDesc.AccessFlag.PRIVATE, MethodDesc.AccessFlag.STATIC),
+                cf.putUTFIfAbsent("+\u0007-"),
+                cf.putUTFIfAbsent("(B)V"),
+                new AttributeDesc[]{
+                        new CodeAttribute(
+                                cf.putUTFIfAbsent("Code"),
+                                2,
+                                1,
+                                new Instruction[]{
+                                        new InvokeStaticInstruction(getMethod),
+                                        new ILoad_0Instruction(),
+                                        new IAddInstruction(),
+                                        new InvokeStaticInstruction(setMethod),
+                                        new ReturnInstruction()
+                                },
+                                new CodeAttribute.ExceptionDesc[0],
+                                new AttributeDesc[0]
+                        )
+                }
+        ));
+
+        final int plusMinusMethod = cf.addConstant(new MethodRefConstant(
+                cf.getThisClassIndex(),
                 cf.addConstant(new NameAndTypeConstant(
-                        cf.putUTFIfAbsent("in"),
-                        cf.putUTFIfAbsent("Ljava/io/InputStream;")
+                        cf.putUTFIfAbsent("+\u0007-"),
+                        cf.putUTFIfAbsent("(B)V")
                 ))
         ));
 
-        List<Instruction> inst = new ArrayList<>();
-        List<StackMapFrame> smf = new ArrayList<>();
+        cf.addMethod(new MethodDesc(
+                MethodDesc.combineFlags(MethodDesc.AccessFlag.PRIVATE, MethodDesc.AccessFlag.STATIC),
+                cf.putUTFIfAbsent("shift"),
+                cf.putUTFIfAbsent("(I)V"),
+                new AttributeDesc[]{
+                        new CodeAttribute(
+                                cf.putUTFIfAbsent("Code"),
+                                2,
+                                1,
+                                new Instruction[]{
+                                        new GetStaticInstruction(pointerField),
+                                        new ILoad_0Instruction(),
+                                        new IAddInstruction(),
+                                        new PutStaticInstruction(pointerField),
+                                        new ReturnInstruction()
+                                },
+                                new CodeAttribute.ExceptionDesc[0],
+                                new AttributeDesc[0]
+                        )
+                }
+        ));
 
+        final int shiftMethod = cf.addConstant(new MethodRefConstant(
+                cf.getThisClassIndex(),
+                cf.addConstant(new NameAndTypeConstant(
+                        cf.putUTFIfAbsent("shift"),
+                        cf.putUTFIfAbsent("(I)V")
+                ))
+        ));
 
-        inst.addAll(List.of(
+        List<Instruction> mainMethodCode = new ArrayList<>();
+        Stack<Integer> openBracketPositions = new Stack<>();
+        List<Integer> allJumpPositions = new ArrayList<>();
+
+        mainMethodCode.addAll(List.of(
                 new IConst_0Instruction(),
-                new IStore_0Instruction(),
-                new SipushInstruction((short) 10000),
+                new PutStaticInstruction(pointerField),
+                new SipushInstruction((short) DATA_SIZE),
                 new NewArrayInstruction(8),
-                new AStore_1Instruction()
+                new PutStaticInstruction(dataField)
         ));
 
-        smf.add(new FullFrame(
-                getIndex(inst),
-                new VerificationTypeInfo[]{
-                        new IntegerVariableInfo(),
-                        new ObjectVariableInfo(7, ca)
-                },
-                new VerificationTypeInfo[0]
-        ));
-        Stack<Integer> jumps = new Stack<>();
-        List<Integer> sm = new ArrayList<>();
+        int plusMinus = 0;
+        int shift = 0;
 
-        int total = 0;
         for (char c : CODE.toCharArray()) {
             if (c == '+') {
-                total++;
+                plusMinus++;
             } else if (c == '-') {
-                total--;
-            } else if (total != 0) {
-                inst.addAll(List.of(
-                        new ALoad_1Instruction(),
-                        new ILoad_0Instruction(),
-                        new Dup2Instruction(),
-                        new BALoadInstruction(),
-                        new BipushInstruction((byte) total),
-                        new IAddInstruction(),
-                        new BAStoreInstruction()));
-                total = 0;
+                plusMinus--;
+            } else if (plusMinus != 0) {
+                mainMethodCode.addAll(List.of(
+                        new BipushInstruction((byte) plusMinus),
+                        new InvokeStaticInstruction(plusMinusMethod)
+                ));
+                plusMinus = 0;
             }
             if (c == '>') {
-                inst.add(new IincInstruction(0, 1));
+                shift++;
             } else if (c == '<') {
-                inst.add(new IincInstruction(0, -1));
-            } else if (c == '.') {
-                inst.addAll(List.of(
-                        new GetStaticInstruction(soutField),
-                        new ALoad_1Instruction(),
-                        new ILoad_0Instruction(),
-                        new BALoadInstruction(),
-                        new InvokeVirtualInstruction(soutMethod)
+                shift--;
+            } else if (shift != 0) {
+                mainMethodCode.addAll(List.of(
+                        new BipushInstruction((byte) shift),
+                        new InvokeStaticInstruction(shiftMethod)
                 ));
+                shift = 0;
+            }
+            if (c == '.') {
+                mainMethodCode.add(new InvokeStaticInstruction(printMethod));
             } else if (c == ',') {
-                inst.addAll(List.of(
-                        new ALoad_1Instruction(),
-                        new ILoad_0Instruction(),
-                        new GetStaticInstruction(sinField),
-                        new InvokeVirtualInstruction(sinMethod),
-                        new BAStoreInstruction()
-                ));
+                mainMethodCode.add(new InvokeStaticInstruction(readMethod));
             } else if (c == '[') {
-                final int index = getIndex(inst);
-                jumps.push(index);
-                sm.add(index);
+                openBracketPositions.push(getIndex(mainMethodCode));
+                allJumpPositions.add(getIndex(mainMethodCode));
+                mainMethodCode.add(new InvokeStaticInstruction(getMethod));
+                mainMethodCode.add(null);
             } else if (c == ']') {
-                inst.addAll(List.of(
-                        new ALoad_1Instruction(),
-                        new IConst_0Instruction(),
-                        new BALoadInstruction()
-                ));
-
-                final int jumpDelta = jumps.pop() - getIndex(inst);
-                inst.add(new IfneInstruction(jumpDelta));
+                final int jumpPos = openBracketPositions.pop();
+                mainMethodCode.add(new GotoInstruction(jumpPos - getIndex(mainMethodCode)));
+                mainMethodCode.set(mainMethodCode.lastIndexOf(null), new IfeqInstruction(getIndex(mainMethodCode) - jumpPos - 3));
+                allJumpPositions.add(getIndex(mainMethodCode));
             }
         }
-        inst.add(new ReturnInstruction());
-        int last = 8;
-        for (int i : sm) {
-            if (i - last - 1 > 63) {
-                smf.add(new FullFrame(
-                        i - last - 1,
-                        new VerificationTypeInfo[]{
-                                new IntegerVariableInfo(),
-                                new ObjectVariableInfo(7, ca)
-                        },
+
+        mainMethodCode.add(new ReturnInstruction());
+
+        List<StackMapFrame> stackMapFrames = new ArrayList<>();
+
+        int lastPosition = -1;
+        for (int position : allJumpPositions) {
+            if (lastPosition == -1 || position - lastPosition - 1 > 63) {
+                stackMapFrames.add(new FullFrame(
+                        position - lastPosition - 1,
+                        new VerificationTypeInfo[0],
                         new VerificationTypeInfo[0]
                 ));
             } else {
-                smf.add(new SameFrame(i - last - 1));
+                stackMapFrames.add(new SameFrame(position - lastPosition - 1));
             }
-            last = i;
+            lastPosition = position;
         }
-        MethodDesc main = new MethodDesc(
+
+        cf.addMethod(new MethodDesc(
                 MethodDesc.combineFlags(MethodDesc.AccessFlag.PUBLIC, MethodDesc.AccessFlag.STATIC),
                 cf.putUTFIfAbsent("main"),
                 cf.putUTFIfAbsent("([Ljava/lang/String;)V"),
                 new AttributeDesc[]{
                         new CodeAttribute(
                                 cf.putUTFIfAbsent("Code"),
-                                5,
-                                2,
-                                inst.toArray(Instruction[]::new),
+                                1,
+                                1,
+                                mainMethodCode.toArray(Instruction[]::new),
                                 new CodeAttribute.ExceptionDesc[0],
                                 new AttributeDesc[]{
                                         new StackMapTableAttribute(
                                                 cf.putUTFIfAbsent("StackMapTable"),
-                                                smf.toArray(StackMapFrame[]::new)
+                                                stackMapFrames.toArray(StackMapFrame[]::new)
                                         )
                                 }
                         )
                 }
-        );
-        cf.addMethod(main);
-        FileOutputStream out = new FileOutputStream("/path/to/file");
-        cf.write(out);
-        out.close();
+        ));
+
+        cf.write(new FileOutputStream("/home/ethan/bf.class"));
     }
 }
