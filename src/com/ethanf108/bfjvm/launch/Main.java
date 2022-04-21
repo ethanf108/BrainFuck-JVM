@@ -6,6 +6,7 @@ import edu.rit.csh.intraspect.data.MajorVersion;
 import edu.rit.csh.intraspect.data.MethodDesc;
 import edu.rit.csh.intraspect.data.attribute.AttributeDesc;
 import edu.rit.csh.intraspect.data.attribute.CodeAttribute;
+import edu.rit.csh.intraspect.data.attribute.SourceFileAttribute;
 import edu.rit.csh.intraspect.data.attribute.StackMapTableAttribute;
 import edu.rit.csh.intraspect.data.attribute.stackmaptable.FullFrame;
 import edu.rit.csh.intraspect.data.attribute.stackmaptable.SameFrame;
@@ -63,34 +64,35 @@ public class Main {
         try {
             for (int i = 0; i < args.length; i++) {
                 final String arg = args[i];
-                if (arg.equals("-o") || arg.equals("--output")) {
-                    String path = args[++i];
-                    if (!path.endsWith(".class")) {
-                        path += ".class";
+                switch (arg) {
+                    case "-o", "--output" -> {
+                        String path = args[++i];
+                        if (!path.endsWith(".class")) {
+                            path += ".class";
+                        }
+                        outFile = new File(path);
+                        if (!outFile.exists()) {
+                            outFile.createNewFile();
+                        }
+                        if (!outFile.canWrite()) {
+                            System.out.println("Cannot write to file");
+                            return;
+                        }
                     }
-                    outFile = new File(path);
-                    if (!outFile.exists()) {
-                        outFile.createNewFile();
+                    case "-i", "--input" -> {
+                        final String path = args[++i];
+                        inFile = new File(path);
+                        if (!inFile.exists()) {
+                            System.out.println("File '" + path + "' not found");
+                            return;
+                        }
+                        if (!inFile.canRead()) {
+                            System.out.println("Cannot read from file");
+                            return;
+                        }
                     }
-                    if (!outFile.canWrite()) {
-                        System.out.println("Cannot write to file");
-                        return;
-                    }
-                } else if (arg.equals("-i") || arg.equals("--input")) {
-                    final String path = args[++i];
-                    inFile = new File(path);
-                    if (!inFile.exists()) {
-                        System.out.println("File '" + path + "' not found");
-                        return;
-                    }
-                    if (!inFile.canRead()) {
-                        System.out.println("Cannot read from file");
-                        return;
-                    }
-                } else if (arg.equals("-d") || arg.equals("--data-size")) {
-                    dataSize = Integer.parseInt(args[i++]);
-                } else if (arg.equals("-v") || arg.equals("--verbose")) {
-                    verbose = true;
+                    case "-d", "--data-size" -> dataSize = Integer.parseInt(args[i++]);
+                    case "-v", "--verbose" -> verbose = true;
                 }
             }
         } catch (ArrayIndexOutOfBoundsException ex) {
@@ -107,6 +109,12 @@ public class Main {
         cf.setFlag(ClassFile.AccessFlag.PUBLIC);
         cf.setMajorVersion(new MajorVersion(61));
         cf.setMinorVersion(0);
+        if (inFile != null) {
+            cf.addAttribute(new SourceFileAttribute(
+                    cf.putUTFIfAbsent("SourceFile"),
+                    cf.putUTFIfAbsent(inFile.getName())
+            ));
+        }
 
         final int systemClass = cf.addConstant(new ClassConstant(cf.putUTFIfAbsent("java/lang/System")));
         final int printStreamClass = cf.addConstant(new ClassConstant(cf.putUTFIfAbsent("java/io/PrintStream")));
@@ -520,6 +528,9 @@ public class Main {
 
         int lastPosition = -1;
         for (int position : allJumpPositions) {
+            if (position == lastPosition) {
+                continue;
+            }
             if (lastPosition == -1 || position - lastPosition - 1 > 63) {
                 stackMapFrames.add(new FullFrame(
                         position - lastPosition - 1,
